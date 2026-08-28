@@ -8,20 +8,59 @@ const WHATSAPP_NUMBER = "5599999999999";
 const WHATSAPP_DEFAULT_MESSAGE =
   "Olá, sou síndico(a) ou gestor(a) de um condomínio e gostaria de conversar sobre orientação jurídica para a administração condominial.";
 
-// E-mail que recebe os leads do formulário via FormSubmit (formsubmit.co).
-// Na primeira submissão, o FormSubmit envia um e-mail de confirmação para este
-// endereço — é preciso clicar no link de confirmação para os envios seguintes
-// caírem na caixa de entrada normalmente.
-const LEAD_EMAIL = "advocacia@cortinhas.com.br";
+// Envio dos leads por e-mail via EmailJS (emailjs.com), usando a caixa real
+// advocacia@cortinhas.com.br como remetente/destinatário — evita o bloqueio
+// que serviços terceiros genéricos (como o FormSubmit) sofreram no servidor
+// de e-mail do domínio.
+const EMAILJS_PUBLIC_KEY = "6xM3ecegYe3BAPRLH";
+const EMAILJS_SERVICE_ID = "service_ozeb3m2";
+const EMAILJS_TEMPLATE_ID = "template_vwpbgq9";
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (typeof emailjs !== "undefined") {
+    emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+  }
   initFaq();
   initForm();
   initThanksPage();
   initMarquee();
+  initServicesCarousel();
   const yearEl = document.getElementById("year");
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 });
+
+/* ---------- Carrossel de áreas de atuação (mobile) ---------- */
+function initServicesCarousel() {
+  const grid = document.querySelector(".services-grid");
+  const prevBtn = document.getElementById("services-prev");
+  const nextBtn = document.getElementById("services-next");
+  if (!grid || !prevBtn || !nextBtn) return;
+
+  function cardStep() {
+    const card = grid.querySelector(".service-card");
+    if (!card) return grid.clientWidth;
+    const gap = parseFloat(getComputedStyle(grid).gap || "0");
+    return card.getBoundingClientRect().width + gap;
+  }
+
+  function updateButtons() {
+    const maxScroll = grid.scrollWidth - grid.clientWidth - 1;
+    prevBtn.disabled = grid.scrollLeft <= 0;
+    nextBtn.disabled = grid.scrollLeft >= maxScroll;
+  }
+
+  prevBtn.addEventListener("click", () => {
+    grid.scrollBy({ left: -cardStep(), behavior: "smooth" });
+  });
+
+  nextBtn.addEventListener("click", () => {
+    grid.scrollBy({ left: cardStep(), behavior: "smooth" });
+  });
+
+  grid.addEventListener("scroll", updateButtons, { passive: true });
+  window.addEventListener("resize", updateButtons);
+  updateButtons();
+}
 
 /* ---------- Marquee (faixa de scroll infinito) ---------- */
 function initMarquee() {
@@ -172,46 +211,36 @@ function initForm() {
       console.error("Falha ao enviar lead por e-mail:", err);
     }
 
-    trackConversion(data);
-
     window.location.href = "obrigado.html";
   });
 
   goToStep(1);
 }
 
-/* ---------- Envio do lead por e-mail (FormSubmit) ---------- */
+/* ---------- Envio do lead por e-mail (EmailJS) ---------- */
 async function sendLeadEmail(data) {
-  const payload = new URLSearchParams({
-    _subject: "Novo lead - LP Direito Condominial (Cortinhas Advocacia)",
-    ...data,
-  });
-
-  await fetch(`https://formsubmit.co/ajax/${LEAD_EMAIL}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
-    },
-    body: payload.toString(),
-  });
+  if (typeof emailjs === "undefined") {
+    throw new Error("SDK do EmailJS não carregado.");
+  }
+  await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, data);
 }
 
 function formatPhone(value) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
+  let digits = value.replace(/\D/g, "");
+
+  // Autopreenchimento do navegador às vezes inclui o DDI 55 (ex.: +55 19 99999-9999).
+  // Só remove quando sobrar dígito além de um número completo (DDD+telefone),
+  // pra não confundir com DDD 55 (Rio Grande do Sul), que é um DDD real.
+  if (digits.length > 11 && digits.startsWith("55")) {
+    digits = digits.slice(2);
+  }
+
+  digits = digits.slice(0, 11);
+
   if (digits.length <= 2) return digits;
   if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-}
-
-/* ---------- Google Ads conversion (placeholder) ---------- */
-function trackConversion(data) {
-  // Quando o Google Ads/GTM estiverem instalados, dispare a conversão aqui, ex:
-  // gtag('event', 'conversion', { send_to: 'AW-XXXXXXXXX/XXXXXXXXXXXXXXXXXXXX' });
-  if (typeof gtag === "function") {
-    gtag("event", "generate_lead", { event_category: "Formulário LP Direito Condominial" });
-  }
 }
 
 /* ---------- Thank you page ---------- */
@@ -219,13 +248,20 @@ function initThanksPage() {
   const link = document.getElementById("whatsapp-link");
   if (!link) return;
 
-  let leadName = "";
+  let lead = {};
   try {
-    const lead = JSON.parse(sessionStorage.getItem("condolp_lead") || "{}");
-    leadName = lead.nome ? lead.nome.split(" ")[0] : "";
+    lead = JSON.parse(sessionStorage.getItem("condolp_lead") || "{}");
   } catch (e) {
-    leadName = "";
+    lead = {};
   }
+  const leadName = lead.nome ? lead.nome.split(" ")[0] : "";
+
+  // Dispara o evento de conversão para o GTM (container GTM-KWSZKRH3).
+  // No painel do GTM, crie uma tag "Google Ads Conversion Tracking" com
+  // ID AW-18382324417 / rótulo i9FfCK7V5-EcEMGFsL1E, disparada por este
+  // evento personalizado.
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: "generate_lead" });
 
   const message = encodeURIComponent(WHATSAPP_DEFAULT_MESSAGE);
   link.href = `https://wa.me/${WHATSAPP_NUMBER}?text=${message}`;

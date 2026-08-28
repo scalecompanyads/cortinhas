@@ -16,6 +16,9 @@ const EMAILJS_PUBLIC_KEY = "6xM3ecegYe3BAPRLH";
 const EMAILJS_SERVICE_ID = "service_ozeb3m2";
 const EMAILJS_TEMPLATE_ID = "template_vwpbgq9";
 
+// Webhook do Make.com: dispara em paralelo ao e-mail, a cada envio do formulário.
+const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/yxsw8v5o6xw1v232ey7jdnqbemxet28p";
+
 document.addEventListener("DOMContentLoaded", () => {
   if (typeof emailjs !== "undefined") {
     emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
@@ -203,13 +206,15 @@ function initForm() {
     const btnSubmit = document.getElementById("btn-submit");
     if (btnSubmit) btnSubmit.disabled = true;
 
-    try {
-      await sendLeadEmail(data);
-    } catch (err) {
-      // Não bloqueia o funil por falha no envio do e-mail: o WhatsApp na
-      // página de obrigado segue como canal de contato mesmo nesse caso.
-      console.error("Falha ao enviar lead por e-mail:", err);
-    }
+    // Dispara e-mail e webhook em paralelo; nenhum dos dois bloqueia o funil
+    // se falhar — o WhatsApp na página de obrigado segue como canal de contato.
+    const results = await Promise.allSettled([sendLeadEmail(data), sendLeadWebhook(data)]);
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        const label = index === 0 ? "e-mail (EmailJS)" : "webhook (Make.com)";
+        console.error(`Falha ao enviar lead por ${label}:`, result.reason);
+      }
+    });
 
     window.location.href = "obrigado.html";
   });
@@ -223,6 +228,15 @@ async function sendLeadEmail(data) {
     throw new Error("SDK do EmailJS não carregado.");
   }
   await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, data);
+}
+
+/* ---------- Envio do lead via webhook (Make.com) ---------- */
+async function sendLeadWebhook(data) {
+  await fetch(MAKE_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
 }
 
 function formatPhone(value) {
